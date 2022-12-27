@@ -67,6 +67,7 @@ def send_message_to_sqs_queue(queue_name, message, group_id):
             MessageBody=message,
             MessageGroupId=group_id
         )
+        print('Successfully sent msg to: ', queue_name)
         return response
     except Exception as e:
         print(e)
@@ -95,6 +96,8 @@ def send_bulk_messages_to_sqs_queue(queue_name, messages, group_id):
                 # print(response)
                 if response['ResponseMetadata']['HTTPStatusCode'] == 200 and 'connection' not in response['ResponseMetadata']['HTTPHeaders']:
                     break
+        print('Step ', i+1, '/', len(messages), ' successful.')
+    print('Successfully sent ', len(messages), ' messages to: ', queue_name)
 
 # GET LAST 10 MESSAGES FROM SQS QUEUE:
 def get_last_ten_messages_from_sqs_queue(queue_name, flight_time):

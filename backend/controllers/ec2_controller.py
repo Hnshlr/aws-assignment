@@ -145,7 +145,36 @@ def exec_SSH_on_instance(instance_name, command):
     except Exception as e:
         return e
 
+# EXECUTE SSH COMMAND ON INSTANCE - BY NAME - DON'T WAIT FOR RESPONSE:
+def exec_SSH_on_instance_no_wait(instance_name, command):
+    paramiko_key = paramiko.RSAKey.from_private_key_file(pem_key)
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(hostname=get_instance_public_dns_by_id(get_instance_id_by_name(instance_name)), username='ec2-user', pkey=paramiko_key)
+        client.exec_command(command)
+    except Exception as e:
+        return e
+
 # DOWNLOAD DIRECTORY ON INSTANCE FROM S3 BUCKET - BY NAME:
 def download_directory_on_instance_from_s3_bucket(instance_name, s3_bucket, s3_directory, local_directory):
+    try:
+        exec_SSH_on_instance(instance_name, 'rm -rf '+local_directory)
+    except:
+        pass
     stdout, stderr = exec_SSH_on_instance(instance_name, 'aws s3 sync s3://'+s3_bucket+'/'+s3_directory+' '+local_directory)
     return stdout, stderr
+
+# UPLOAD LOCAL FILE TO EC2 INSTANCE - BY NAME:
+def upload_local_file_to_ec2_instance(instance_name, local_file, remote_file):
+    paramiko_key = paramiko.RSAKey.from_private_key_file(pem_key)
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(hostname=get_instance_public_dns_by_id(get_instance_id_by_name(instance_name)), username='ec2-user', pkey=paramiko_key)
+        sftp = client.open_sftp()
+        sftp.put(local_file, remote_file)
+        sftp.close()
+        return 'File uploaded successfully.'
+    except Exception as e:
+        return e

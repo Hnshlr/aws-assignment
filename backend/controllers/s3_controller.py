@@ -34,10 +34,14 @@ def view_all_s3_buckets():
 
 # UPLOAD LOCAL FILE TO S3 BUCKET:
 def upload_local_file_to_s3(filename, bucketname, destination_path):
-    s3.Bucket(bucketname).upload_file(filename, destination_path+filename)
+    s3.Bucket(bucketname).upload_file(filename, destination_path)
 
 # UPLOAD DIRECTORY OF MULTIPLES SUB-DIRS TO A S3 BUCKET (FOLDER THAT CONTAINS MULTIPLES SUB-DIRECTORIES AND FILES):
 def upload_dir_to_s3(dir_path, bucket_name, s3_path):
+    # If the directory already exists in S3, delete it
+    if s3_path in [obj.key for obj in s3.Bucket(bucket_name).objects.all()]:
+        delete_directory_from_s3_bucket(bucket_name, s3_path)
+    # Upload the directory to S3
     for subdir in os.listdir(dir_path):
         # If the sub-directory is a file, upload it to S3:
         if os.path.isfile(os.path.join(dir_path, subdir)):
@@ -48,6 +52,18 @@ def upload_dir_to_s3(dir_path, bucket_name, s3_path):
                 # If the file is not a directory, upload it to S3:
                 if not os.path.isdir(os.path.join(dir_path, subdir, file)):
                     s3.meta.client.upload_file(os.path.join(dir_path, subdir, file), bucket_name, os.path.join(s3_path, subdir, file))
+
+# DOWNLOAD FILE FROM S3 BUCKET:
+def download_file_from_s3(bucketname, path, filename, destination_path):
+    s3.Bucket(bucketname).download_file(path+filename, destination_path+filename)
+
+# DOWNLOAD DIRECTORY FROM S3 BUCKET:
+def download_directory_from_s3_bucket(bucket_name, directory_name, destination_path):
+    bucket = s3.Bucket(bucket_name)
+    for obj in bucket.objects.filter(Prefix=directory_name):
+        if not os.path.exists(os.path.dirname(destination_path+obj.key)):
+            os.makedirs(os.path.dirname(destination_path+obj.key))
+        bucket.download_file(obj.key, destination_path+obj.key)
 
 # DELETE FILE FROM S3 BUCKET:
 def delete_file_from_s3(filename, bucketname, path):
