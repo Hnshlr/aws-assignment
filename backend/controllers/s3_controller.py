@@ -1,7 +1,7 @@
 import boto3
 import os
 
-s3 = boto3.resource('s3')
+s3 = boto3.resource('s3', region_name='us-east-1')
 
 # CREATE S3 BUCKET:
 def create_s3_bucket(bucket_name):
@@ -52,6 +52,7 @@ def upload_dir_to_s3(dir_path, bucket_name, s3_path):
                 # If the file is not a directory, upload it to S3:
                 if not os.path.isdir(os.path.join(dir_path, subdir, file)):
                     s3.meta.client.upload_file(os.path.join(dir_path, subdir, file), bucket_name, os.path.join(s3_path, subdir, file))
+    print("Successfully uploaded %s to %s." % (dir_path, bucket_name))
 
 # DOWNLOAD FILE FROM S3 BUCKET:
 def download_file_from_s3(bucketname, path, filename, destination_path):

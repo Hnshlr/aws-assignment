@@ -6,7 +6,7 @@ import paramiko
 # Permission key:
 pem_key = 'learner-lab-cfg/labsuser.pem'
 # Create an EC2 resource (higher level abstraction than a client):
-ec2 = boto3.resource('ec2')
+ec2 = boto3.resource('ec2', region_name='us-east-1')
 
 # START ALL EC2 INSTANCES:
 def start_all_instances():
@@ -101,13 +101,32 @@ def create_instances_and_wait_for_running(names):
         time.sleep(1)
         instances = ec2.instances.filter(Filters=[{'Name': 'tag:Name', 'Values': names}, {'Name': 'instance-state-name', 'Values': ['pending']}])
     print('All instances are running.')
+    print('Instances public IPs:')
+    publicips = []
+    for instance in ec2.instances.filter(Filters=[{'Name': 'tag:Name', 'Values': names}, {'Name': 'instance-state-name', 'Values': ['running']}]):
+        publicips.append(instance.public_dns_name)
+    print(publicips)
 
 # UPDATE INSTANCE AWS CREDENTIALS:
-def update_instance_credentials_using_boto3_session_credentials(instance_name):
-    exec_SSH_on_instance(instance_name, 'aws configure set aws_access_key_id '+get_boto3_session_credentials().access_key)
-    exec_SSH_on_instance(instance_name, 'aws configure set aws_secret_access_key '+get_boto3_session_credentials().secret_key)
-    exec_SSH_on_instance(instance_name, 'aws configure set aws_session_token '+get_boto3_session_credentials().token)
-    exec_SSH_on_instance(instance_name, 'aws configure set region us-east-1')
+def update_instances_credentials_using_boto3_session_credentials(instance_ids):
+    boto3_credentials = get_boto3_session_credentials()
+    commands = [
+        'aws configure set aws_access_key_id '+boto3_credentials.access_key,
+        'aws configure set aws_secret_access_key '+boto3_credentials.secret_key,
+        'aws configure set aws_session_token '+boto3_credentials.token,
+        'aws configure set region us-east-1'
+    ]
+    paramiko_key = paramiko.RSAKey.from_private_key_file(pem_key)
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    for instance_id in instance_ids:
+        client.connect(hostname=get_instance_public_dns_by_id(instance_id), username='ec2-user', pkey=paramiko_key)
+        for command in commands:
+            stdin, stdout, stderr = client.exec_command(command)
+            if stderr.read().decode('utf-8') != '':
+                print('Error: ', stderr.read().decode('utf-8'))
+        client.close()
+    print('All instances credentials updated.')
 
 # GET INSTANCE ID - BY NAME:
 def get_instance_id_by_name(name):
@@ -115,11 +134,27 @@ def get_instance_id_by_name(name):
         if instance.tags[0]['Value'] == name and instance.state['Name'] != 'terminated':
             return instance.id
 
+# GET INSTANCE IDS - BY NAMES:
+def get_instance_ids_by_names(names):
+    instance_ids = []
+    for instance in ec2.instances.all():
+        if instance.tags[0]['Value'] in names and instance.state['Name'] != 'terminated':
+            instance_ids.append(instance.id)
+    return instance_ids
+
 # GET INSTANCE PUBLIC IP - BY NAME:
 def get_instance_public_dns_by_name(name):
     for instance in ec2.instances.all():
         if instance.tags[0]['Value'] == name and instance.state['Name'] != 'terminated':
             return instance.public_dns_name
+
+# GET INSTANCES PUBLIC IPS - BY NAMES:
+def get_instances_public_dns_by_names(names):
+    instance_public_dns = []
+    for instance in ec2.instances.all():
+        if instance.tags[0]['Value'] in names and instance.state['Name'] != 'terminated':
+            instance_public_dns.append(instance.public_dns_name)
+    return instance_public_dns
 
 # GET INSTANCE PUBLIC IP - BY NAME:
 def get_instance_public_ip_by_name(name):
@@ -142,17 +177,6 @@ def exec_SSH_on_instance(instance_name, command):
         client.connect(hostname=get_instance_public_dns_by_id(get_instance_id_by_name(instance_name)), username='ec2-user', pkey=paramiko_key)
         stdin, stdout, stderr = client.exec_command(command)
         return stdout.read(), stderr.read()
-    except Exception as e:
-        return e
-
-# EXECUTE SSH COMMAND ON INSTANCE - BY NAME - DON'T WAIT FOR RESPONSE:
-def exec_SSH_on_instance_no_wait(instance_name, command):
-    paramiko_key = paramiko.RSAKey.from_private_key_file(pem_key)
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        client.connect(hostname=get_instance_public_dns_by_id(get_instance_id_by_name(instance_name)), username='ec2-user', pkey=paramiko_key)
-        client.exec_command(command)
     except Exception as e:
         return e
 
