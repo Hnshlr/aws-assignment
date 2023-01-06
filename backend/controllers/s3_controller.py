@@ -9,9 +9,14 @@ def create_s3_bucket(bucket_name):
         s3.create_bucket(
             Bucket=bucket_name
         )
-        print("S3 bucket created successfully")
+        print("Successfully create S3 bucket: ", bucket_name)
     except Exception as e:
         print(e)
+
+# CREATE MULTIPLES S3 BUCKETS:
+def create_s3_buckets(bucket_names):
+    for bucket_name in bucket_names:
+        create_s3_bucket(bucket_name)
 
 # DELETE S3 BUCKET:
 def delete_s3_bucket(bucket_name):
@@ -23,6 +28,17 @@ def delete_s3_bucket(bucket_name):
     except Exception as e:
         print(e)
 
+# DELETE MULTIPLES S3 BUCKETS:
+def delete_s3_buckets(bucket_names):
+    for bucket_name in bucket_names:
+        delete_s3_bucket(bucket_name)
+
+# DELETE ALL S3 BUCKETS:
+def delete_all_s3_buckets():
+    for bucket in s3.buckets.all():
+        delete_s3_bucket(bucket.name)
+        print('Deleted S3 bucket: ', bucket.name)
+
 # PRINT S3 BUCKET DETAILS:
 def print_s3_bucket_details(bucket):
     print("{name=%s, creation_date=%s}" % (bucket.name, bucket.creation_date))
@@ -31,6 +47,14 @@ def print_s3_bucket_details(bucket):
 def view_all_s3_buckets():
     for bucket in s3.buckets.all():
         print_s3_bucket_details(bucket)
+
+# VIEW ALL S3 BUCKETS FILENAMES - WITH A PATH:
+def view_all_s3_buckets_filenames(bucket_name, path):
+    bucket = s3.Bucket(bucket_name)
+    filenames = []
+    for obj in bucket.objects.filter(Prefix=path):
+        filenames.append(obj.key.split('/')[-1].split('.')[0])
+    return filenames
 
 # UPLOAD LOCAL FILE TO S3 BUCKET:
 def upload_local_file_to_s3(filename, bucketname, destination_path):
@@ -65,6 +89,13 @@ def download_directory_from_s3_bucket(bucket_name, directory_name, destination_p
         if not os.path.exists(os.path.dirname(destination_path+obj.key)):
             os.makedirs(os.path.dirname(destination_path+obj.key))
         bucket.download_file(obj.key, destination_path+obj.key)
+
+# PURGE S3 BUCKET:
+def purge_s3_bucket(bucket_name):
+    bucket = s3.Bucket(bucket_name)
+    bucket.objects.all().delete()
+    print('Purged S3 bucket: ', bucket_name)
+
 
 # DELETE FILE FROM S3 BUCKET:
 def delete_file_from_s3(filename, bucketname, path):

@@ -2,40 +2,34 @@ import boto3
 
 ssm_client = boto3.client('ssm', region_name='us-east-1')
 
-# EXECUTE SSH COMMAND ON INSTANCE USING SSM - BY INSTANCE ID:
-def exec_SSH_on_instance_using_SSM(instance_id, command):
-    response = ssm_client.send_command(
-        InstanceIds=[instance_id],
-        DocumentName='AWS-RunShellScript',
-        Parameters={'commands': [command]}
-    )
-    return response
+# EXECUTE SSH COMMANDS ON INSTANCES USING SSM - BY INSTANCE IDS - OPTIONAL OUPUT BUCKET:
+def exec_SSHs_on_instances_using_SSM(instance_ids, commands, output_bucket_name=None):
+    if output_bucket_name is not None:
+        response = ssm_client.send_command(
+            InstanceIds=instance_ids,
+            DocumentName='AWS-RunShellScript',
+            Parameters={'commands': commands},
+            OutputS3BucketName=output_bucket_name
+        )
+    else:
+        response = ssm_client.send_command(
+            InstanceIds=instance_ids,
+            DocumentName='AWS-RunShellScript',
+            Parameters={'commands': commands}
+        )
+    if response['ResponseMetadata']['HTTPStatusCode'] == 200:
+        print('Successfully sent ', len(commands), ' commands to ', len(instance_ids), ' instances.')
+        print('Commands are now being executed in the background.')
+        if output_bucket_name != None:
+            print('Saving output to the S3 bucket: ', output_bucket_name)
+            return response
 
-# EXECUTE SSH COMMANDS ON INSTANCE USING SSM - BY INSTANCE ID:
-def exec_SSHs_on_instance_using_SSM(instance_id, commands):
-    response = ssm_client.send_command(
-        InstanceIds=[instance_id],
-        DocumentName='AWS-RunShellScript',
-        Parameters={'commands': commands}
-    )
-    return response
-
-# EXECUTE SSH COMMANDS ON INSTANCES USING SSM - BY INSTANCE IDS:
-def exec_SSHs_on_instances_using_SSM(instance_ids, commands):
-    response = ssm_client.send_command(
+# STOP SSH COMMANDS ON INSTANCES USING SSM - BY INSTANCE IDS AND COMMAND ID:
+def stop_SSHs_on_instances_using_SSM(instance_ids, command_id):
+    response = ssm_client.cancel_command(
         InstanceIds=instance_ids,
-        DocumentName='AWS-RunShellScript',
-        Parameters={'commands': commands}
+        CommandId=command_id
     )
-    print('Sent ', len(commands), ' commands to ', len(instance_ids), ' instances.')
-    print('Commands are now being executed in the background.')
-    return response
-
-# EXECUTE SSH COMMAND ON INSTANCES USING SSM - BY INSTANCE IDS:
-def exec_SSH_on_instances_using_SSM(instance_ids, command):
-    response = ssm_client.send_command(
-        InstanceIds=instance_ids,
-        DocumentName='AWS-RunShellScript',
-        Parameters={'commands': [command]}
-    )
-    return response
+    if response['ResponseMetadata']['HTTPStatusCode'] == 200:
+        print('Successfully stopped command ', command_id, ' on ', len(instance_ids), ' instances.')
+        return response

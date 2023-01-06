@@ -1,12 +1,7 @@
-import sys, os
-import pandas as pd
-
-sys.path.append(os.path.abspath(os.path.join('')))
-from backend.controllers.matrix_controller import *
-from backend.controllers.s3_controller import *
-
-def outprint(stdout, stderr):
+# PRINTER:
+def outprint(stdout, stderr=None):
     if stdout.decode('utf-8') != '':
-        print(stdout.decode('utf-8'))
-    if stderr.decode('utf-8') != '':
-        print('Error:\n', stderr.decode('utf-8'))
+        print(stdout.decode('utf-8')[:-1])
+    if stderr != None:
+        if stderr.decode('utf-8') != '':
+            print(stderr.decode('utf-8')[:-1])

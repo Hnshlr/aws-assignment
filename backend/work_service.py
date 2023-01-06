@@ -1,22 +1,125 @@
 import sys
 import os
-import numpy as np
 import pandas as pd
-import json
 
 sys.path.append(os.path.abspath(os.path.join('')))
 from backend.controllers.sqs_controller import *
 from backend.controllers.matrix_controller import *
 from backend.controllers.s3_controller import *
 
-# JOB: CREATE A MATRIX, SPLIT IT INTO SLICES, AND SEND THE SLICES TO THE JOBS QUEUE:
-def create_matrix_then_split_and_send_jobs(matrix_shape, jobs_queue_name, s3_bucket_name):
+# MASTER'S JOB: SEND A MATRIX MULTIPLICATION JOB TO SQS, WHILE COLLECTING RESULTS:
+def master_loop(matrix_shape, jobs_queue_name, results_queue_name, s3_bucket_name):
+    jobs_messages = create_matrix_and_messages(matrix_shape, jobs_queue_name, s3_bucket_name)
+    results_messages = []
+    blocks_amount = len(jobs_messages)
+    result_size = int(np.sqrt(blocks_amount))
+    op_id = json.loads(jobs_messages[0])['op-id']
+    blocks_matrix = np.empty((result_size, result_size), dtype=np.ndarray)
+    try:
+        jobs_queue = sqs.get_queue_by_name(QueueName=jobs_queue_name)
+        jobs_queue.purge()
+        jobs_groupid = 'work'
+        results_queue = sqs.get_queue_by_name(QueueName=results_queue_name)
+        results_queue.purge()
+        result_groupid = 'result'
+        print('Jobs and results queues ready.')
+    except Exception as e:
+        print(e)
+        return None
+    send_jobs, receive_results = True, True
+    print('Starting master loop...')
+    while send_jobs or receive_results:
+        # Send jobs to the jobs SQS queue:
+        if len(jobs_messages) == 0 and send_jobs:
+            print('All jobs have been sent.')
+            send_jobs = False
+        if send_jobs:
+            response = jobs_queue.send_message(
+                MessageBody=jobs_messages[0],
+                MessageGroupId=jobs_groupid
+            )
+            verify_response_and_resend_if_needed(response, jobs_messages[0], jobs_groupid, jobs_queue)
+            jobs_messages.pop(0)
+            print('Sent job n° ', blocks_amount - len(jobs_messages), '/', blocks_amount, ' successfully.')
+        # Gather results from the results SQS queue:
+        if len(results_messages) == blocks_amount and receive_results:
+            print('All computed results have been received.')
+            receive_results = False
+            # Concatenate the blocks array of arrays of arrays into a single array of arrays:
+            result_matrix = np.concatenate([np.concatenate(blocks_matrix[i], axis=1) for i in range(blocks_matrix.shape[0])], axis=0)
+            pd.DataFrame(result_matrix).to_csv('backend/data/output/mx/' + op_id + '.csv', index=False, header=False)
+            upload_local_file_to_s3('backend/data/output/mx/' + op_id + '.csv', s3_bucket_name, 'backend/data/output/mx/' + op_id + '.csv')
+            print('Result matrix id n°', op_id, ' successfully computed and saved to: ', s3_bucket_name)
+        if receive_results:
+            messages = results_queue.receive_messages(MaxNumberOfMessages=10, VisibilityTimeout=5)
+            for message in messages:
+                results_queue.delete_messages(Entries=[{'Id': '1', 'ReceiptHandle': message.receipt_handle}])
+                results_messages.append(message)
+                message_body = json.loads(message.body)
+                blocks_matrix[message_body['i']][message_body['j']] = np.array(message_body['result'])
+                print('Received block result n° [', message_body['i'], ',', message_body['j'], '] from operation id n° ', message_body['op-id'], ' successfully.')
+    print('Shutting down the master loop...')
+
+# WORKER'S JOB: KEEP LISTENING TO THE SQS QUEUE, COLLECT JOBS, COMPUTE RESULTS AND SEND TO SQS QUEUE:
+def worker_loop(jobs_queue_name, results_queue_name):
+    try:
+        jobs_queue = sqs.get_queue_by_name(QueueName=jobs_queue_name)
+        results_queue = sqs.get_queue_by_name(QueueName=results_queue_name)
+        result_groupid = 'result'
+        print('Jobs and results queues ready.')
+    except Exception as e:
+        print(e)
+        return None
+    print('Starting worker loop...')
+    while True:
+        try:
+            messages = jobs_queue.receive_messages(MaxNumberOfMessages=10, VisibilityTimeout=5)
+            # If the message has a specific group id, break the loop:
+            if len(messages) != 0:
+                print('Received ', len(messages), ' jobs. Processing...')
+            for message in messages:
+                jobs_queue.delete_messages(Entries=[{'Id': '1', 'ReceiptHandle': message.receipt_handle}])
+                message_body = json.loads(message.body)
+                result = np.dot(np.array(message_body['left-slice']), np.array(message_body['right-slice']))
+                result_message = {
+                    'message-id': message_body['message-id'],
+                    'op-id': message_body['op-id'],
+                    'op-type': message_body['op-type'],
+                    'matrix-shape': message_body['matrix-shape'],
+                    'block-shape': message_body['block-shape'],
+                    'i': message_body['i'],
+                    'j': message_body['j'],
+                    'result': result.tolist()
+                }
+                response = results_queue.send_message(
+                    MessageBody=json.dumps(result_message),
+                    MessageGroupId=result_groupid
+                )
+                verify_response_and_resend_if_needed(response, json.dumps(result_message), result_groupid, results_queue)
+                print('Sent block result n° [', message_body['i'], ',', message_body['j'], '] from operation id n° ', message_body['op-id'], ' successfully.')
+        except Exception as e:
+            print(e)
+            return None
+
+
+# SERVICES:
+def verify_response_and_resend_if_needed(response, message_body, groupd_id, queue_name):
+    if response['ResponseMetadata']['HTTPStatusCode'] != 200 or 'connection' in response['ResponseMetadata']['HTTPHeaders']:
+        while response['ResponseMetadata']['HTTPStatusCode'] != 200 or 'connection' in response['ResponseMetadata']['HTTPHeaders']:
+            response = queue_name.send_message(
+                MessageBody=message_body,
+                MessageGroupId=groupd_id
+            )
+            if response['ResponseMetadata']['HTTPStatusCode'] == 200 and 'connection' not in response['ResponseMetadata']['HTTPHeaders']:
+                break
+
+def create_matrix_and_messages(matrix_shape, jobs_queue_name, s3_bucket_name):
     # CREATE A MATRIX - GIVING THE SIDE SIZE:
     matrix = create_random_square_matrix(matrix_shape)
-    mx_id = str(np.random.randint(1000000000))
+    op_id = str(np.random.randint(1000000000))
     print('Created a random ' + str(matrix_shape) + 'x' + str(matrix_shape) + ' matrix.')
-    pd.DataFrame(matrix).to_csv('backend/data/input/' + mx_id + '.csv', index=False, header=False)
-    upload_local_file_to_s3('backend/data/input/' + mx_id + '.csv', s3_bucket_name, 'backend/data/input/' + mx_id + '.csv')
+    pd.DataFrame(matrix).to_csv('backend/data/input/' + op_id + '.csv', index=False, header=False)
+    upload_local_file_to_s3('backend/data/input/' + op_id + '.csv', s3_bucket_name, 'backend/data/input/' + op_id + '.csv')
     print('Uploaded the matrix to: ' + s3_bucket_name)
 
     # SPLIT MATRIX INTO BLOCKS - USING OPTIMAL BLOCKS AMOUNT:
@@ -36,8 +139,10 @@ def create_matrix_then_split_and_send_jobs(matrix_shape, jobs_queue_name, s3_buc
     for i in range(0, blocks.shape[0]):
         for j in range(0, blocks.shape[1]):
             message_body = {
-                'mx-id': mx_id,
-                'mx-shape': matrix_shape,
+                'message-id': i * blocks.shape[0] + j + 1,
+                'op-id': op_id,
+                'op-type': 'mx',
+                'matrix-shape': matrix_shape,
                 'block-shape': blocks.shape[0],
                 'i': i,
                 'j': j,
@@ -46,71 +151,7 @@ def create_matrix_then_split_and_send_jobs(matrix_shape, jobs_queue_name, s3_buc
             }
             json_message_body = json.dumps(message_body)
             messages.append(json_message_body)
-
-    # BULK SEND MESSAGES TO THE "JOBS" QUEUE:
-    print('Starting to send ' + str(len(messages)) + ' messages to: ' + jobs_queue_name)
-    send_bulk_messages_to_sqs_queue(jobs_queue_name, messages, 'work')
-
-# JOB: GATHER JOBS FROM THE JOBS QUEUE, COMPUTE THE RESULTS, AND SEND THE RESULTS TO THE RESULTS QUEUE:
-def gather_jobs_then_compute_and_send_results(jobs_queue_name, results_queue_name):
-    print("Beginning matrix multiplication.")
-    print("Gathering jobs from the jobs queue, and sending results to the results queue.")
-    while get_amount_of_available_messages_in_sqs_queue(jobs_queue_name) > 0:
-        messages = get_last_ten_messages_from_sqs_queue(jobs_queue_name, 5)
-        result_messages = []
-        print('...')
-        for message in messages:
-            message_body = json.loads(message.body)
-            left_slice = np.array(message_body['left-slice'])
-            right_slice = np.array(message_body['right-slice'])
-            result = np.dot(left_slice, right_slice)
-            result_message_body = {
-                'mx-id': message_body['mx-id'],
-                'mx-shape': message_body['mx-shape'],
-                'block-shape': message_body['block-shape'],
-                'i': message_body['i'],
-                'j': message_body['j'],
-                'result': result.tolist()
-            }
-            json_result_message_body = json.dumps(result_message_body)
-            result_messages.append(json_result_message_body)
-        try:
-            send_bulk_messages_to_sqs_queue(results_queue_name, result_messages, 'result')
-            for message in messages:
-                delete_message_from_sqs_queue(jobs_queue_name, message.receipt_handle)
-        except:
-            print('Error occured while sending messages to the results queue. Continuing.')
-            break
-    print('The jobs queue is empty. All jobs have been gathered and sent to the results queue.')
-
-# JOB: GATHER RESULTS FROM THE RESULTS QUEUE, AND RECONSTRUCT THE RESULT MATRIX:
-def gather_results_and_reconstruct_matrix(results_queue_name, results_s3_bucket_name):
-    print("Beginning matrix reconstruction.")
-    results = []
-    print("Gathering results from the results queue.")
-    while get_amount_of_available_messages_in_sqs_queue(results_queue_name) > 0 or get_amount_of_in_flight_messages_in_sqs_queue(results_queue_name) > 0:
-        messages = get_last_ten_messages_from_sqs_queue(results_queue_name, 5)
-        print('...')
-        for message in messages:
-            message_body = json.loads(message.body)
-            results.append(message_body)
-            delete_message_from_sqs_queue(results_queue_name, message.receipt_handle)
-    print('The results queue is empty. All results have been gathered.')
-    print('Reconstructing the result matrix.')
-    blocks_matrix = np.empty((results[0]['block-shape'], results[0]['block-shape']), dtype=np.ndarray)
-    for result in results:
-        blocks_matrix[result['i']][result['j']] = np.array(result['result'])
-    result_matrix = np.concatenate([np.concatenate(blocks_matrix[i], axis=1) for i in range(blocks_matrix.shape[0])], axis=0)
-    print('Finished reconstructing the result matrix.')
-    print('Sending result matrix in a .csv file to: ' + results_s3_bucket_name)
-    pd.DataFrame(result_matrix).to_csv('backend/data/output/mx/' + results[0]['mx-id'] + '.csv', index=False, header=False)
-    upload_local_file_to_s3('backend/data/output/mx/' + results[0]['mx-id'] + '.csv', results_s3_bucket_name, 'backend/data/output/mx/' + results[0]['mx-id'] + '.csv')
-    print('Finished sending result matrix in a .csv file to: ' + results_s3_bucket_name)
-
-# def download_file_from_s3(bucketname, path, filename, destination_path):
-#     s3.Bucket(bucketname).download_file(path+filename, destination_path+filename)
-
-# JOB: VERIFY A RESULT MATRIX:
+    return messages
 def verify_result_matrix(results_s3_bucket_name, id, op_type):
     if op_type == 'mx':
         download_file_from_s3(results_s3_bucket_name, 'backend/data/output/mx/', id + '.csv', 'backend/data/output/mx/')
@@ -129,13 +170,12 @@ def verify_result_matrix(results_s3_bucket_name, id, op_type):
         print("Results are correct for addition n°" + id + ": " + str(bool))
         return bool
 
+
 def main():
-    if sys.argv[1] == 'create':
-        create_matrix_then_split_and_send_jobs(int(sys.argv[2]), sys.argv[3], sys.argv[4])
-    elif sys.argv[1] == 'getjobs':
-        gather_jobs_then_compute_and_send_results(sys.argv[2], sys.argv[3])
-    elif sys.argv[1] == 'getresults':
-        gather_results_and_reconstruct_matrix(sys.argv[2], sys.argv[3])
+    if sys.argv[1] == 'master':
+        master_loop(int(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5])
+    elif sys.argv[1] == 'worker':
+        worker_loop(sys.argv[2], sys.argv[3])
     elif sys.argv[1] == 'verify':
         verify_result_matrix(sys.argv[2], sys.argv[3], sys.argv[4])
 

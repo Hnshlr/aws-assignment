@@ -15,6 +15,24 @@ def start_all_instances():
         instance.start()
         print('Starting instance: ', instance.id, instance.tags[0]['Value'])
 
+# START ALL EC2 INSTANCES - AND WAIT FOR THEM TO BE RUNNING:
+def start_all_instances_and_wait_for_running():
+    # Start all instances:
+    for instance in ec2.instances.filter(Filters=[{'Name': 'instance-state-name', 'Values': ['stopped']}]):
+        instance.start()
+        print('Starting instance: ', instance.id, instance.tags[0]['Value'])
+    print('All instances started. Waiting for them to be running...')
+    # Filter for instances with the given names:
+    instances = ec2.instances.filter(Filters=[{'Name': 'instance-state-name', 'Values': ['pending']}])
+    amount = 0
+    while len(list(instances)) > 0:
+        if amount != len(list(instances)):
+            print('Remaining instances: ', len(list(instances)))
+            amount = len(list(instances))
+        time.sleep(1)
+        instances = ec2.instances.filter(Filters=[{'Name': 'instance-state-name', 'Values': ['pending']}])
+    print('All instances are running.')
+
 # STOP EC2 INSTANCE - BY NAME:
 def stop_instance_by_name(instance_name):
     # Stop instance by name:
@@ -28,6 +46,24 @@ def stop_all_instances():
     for instance in ec2.instances.filter(Filters=[{'Name': 'instance-state-name', 'Values': ['running']}]):
         instance.stop()
         print('Stopping instance: ', instance.id, instance.tags[0]['Value'])
+
+# STOP ALL EC2 INSTANCES - AND WAIT FOR THEM TO BE STOPPED:
+def stop_all_instances_and_wait_for_stopped():
+    # Stop all instances:
+    for instance in ec2.instances.filter(Filters=[{'Name': 'instance-state-name', 'Values': ['running']}]):
+        instance.stop()
+        print('Stopping instance: ', instance.id, instance.tags[0]['Value'])
+    print('All instances stopped. Waiting for them to be stopped...')
+    # Filter for instances with the given names:
+    instances = ec2.instances.filter(Filters=[{'Name': 'instance-state-name', 'Values': ['stopping']}])
+    amount = 0
+    while len(list(instances)) > 0:
+        if amount != len(list(instances)):
+            print('Remaining instances: ', len(list(instances)))
+            amount = len(list(instances))
+        time.sleep(1)
+        instances = ec2.instances.filter(Filters=[{'Name': 'instance-state-name', 'Values': ['stopping']}])
+    print('All instances are stopped.')
 
 # PRINT EC2 INSTANCE DETAILS:
 def print_instance_details(instance):
@@ -138,7 +174,7 @@ def get_instance_id_by_name(name):
 def get_instance_ids_by_names(names):
     instance_ids = []
     for instance in ec2.instances.all():
-        if instance.tags[0]['Value'] in names and instance.state['Name'] != 'terminated':
+        if instance.tags[0]['Value'] in names and instance.state['Name'] == 'running':
             instance_ids.append(instance.id)
     return instance_ids
 

@@ -41,6 +41,13 @@ def delete_sqs_queue(queue_name):
         print(e)
         return False
 
+# DELETE ALL SQS QUEUES:
+def delete_all_sqs_queues():
+    queues = get_all_sqs_queues()
+    for queue in queues:
+        queue.delete()
+        print('Deleted queue: ', queue.url)
+
 # GET ALL SQS QUEUES:
 def get_all_sqs_queues():
     queues = []
@@ -177,6 +184,7 @@ def purge_queue(queue_name):
     try:
         queue = sqs.get_queue_by_name(QueueName=queue_name)
         queue.purge()
+        print('Purged queue: ', queue_name)
         return True
     except Exception as e:
         print(e)
