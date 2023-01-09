@@ -103,7 +103,7 @@ def create_instance(name):
         ImageId='ami-0b0dcb5067f052a63',
         MinCount=1,
         MaxCount=1,
-        InstanceType='t2.micro',
+        InstanceType='t2.medium' if name == 'master' else 't2.micro',
         KeyName='vockey',
         SecurityGroupIds=['sg-0f52fa9fe5477133b'],
         TagSpecifications=[
@@ -132,9 +132,8 @@ def create_instances_and_wait_for_running(names):
     amount = 0
     while len(list(instances)) > 0:
         if amount != len(list(instances)):
-            print('Remaining instances: ', len(list(instances)))
+            # print('Remaining instances: ', len(list(instances)))
             amount = len(list(instances))
-        time.sleep(1)
         instances = ec2.instances.filter(Filters=[{'Name': 'tag:Name', 'Values': names}, {'Name': 'instance-state-name', 'Values': ['pending']}])
     print('All instances are running.')
     print('Instances public IPs:')
@@ -174,7 +173,7 @@ def get_instance_id_by_name(name):
 def get_instance_ids_by_names(names):
     instance_ids = []
     for instance in ec2.instances.all():
-        if instance.tags[0]['Value'] in names and instance.state['Name'] == 'running':
+        if instance.tags[0]['Value'] in names and instance.state['Name'] == 'running' and instance.state['Name'] != 'terminated':
             instance_ids.append(instance.id)
     return instance_ids
 
@@ -205,14 +204,42 @@ def get_instance_public_dns_by_id(instance_id):
             return instance.public_dns_name
 
 # EXECUTE SSH COMMAND ON INSTANCE - BY NAME:
-def exec_SSH_on_instance(instance_name, command):
+def exec_SSH_on_instance_live(instance_name, command):
+    paramiko_key = paramiko.RSAKey.from_private_key_file(pem_key)
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(hostname=get_instance_public_dns_by_id(get_instance_id_by_name(instance_name)), username='ec2-user', pkey=paramiko_key)
+        # Get the stdout and stderr from the command as they are executed:
+        stdin, stdout, stderr = client.exec_command(command)
+        # Print the stdout and stderr as they are executed, and refresh the screen:
+        for line in stdout:
+            print(line.strip('\n'))
+        for line in stderr:
+            print(line.strip('\n'))
+        client.close()
+    except Exception as e:
+        print('Error: ', e)
+
+
+# EXECUTE SSH COMMAND ON INSTANCE - BY NAME:
+def exec_SSH_on_instance(instance_name, command, print_output=True):
     paramiko_key = paramiko.RSAKey.from_private_key_file(pem_key)
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
         client.connect(hostname=get_instance_public_dns_by_id(get_instance_id_by_name(instance_name)), username='ec2-user', pkey=paramiko_key)
         stdin, stdout, stderr = client.exec_command(command)
-        return stdout.read(), stderr.read()
+        if print_output:
+            print(stdout.read().decode('utf-8').strip('\n'))
+            if stderr.read().decode('utf-8') != '':
+                print('Error: ', stderr.read().decode('utf-8'))
+        else:
+            for line in stdout:
+                pass
+            for line in stderr:
+                pass
+        client.close()
     except Exception as e:
         return e
 

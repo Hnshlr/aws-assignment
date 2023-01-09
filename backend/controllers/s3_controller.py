@@ -9,7 +9,7 @@ def create_s3_bucket(bucket_name):
         s3.create_bucket(
             Bucket=bucket_name
         )
-        print("Successfully create S3 bucket: ", bucket_name)
+        print("Successfully created S3 bucket: ", bucket_name)
     except Exception as e:
         print(e)
 
