@@ -29,3 +29,5 @@ The implementation is developed under Python (version 3.10.6). In order to commu
 ### Validity of the Matrix Product
 
 In order to verify the results, the master EC2 instance responsible for the final gathering of all the block results and reconstruction of the result matrix, saves the result in a .csv file and saves it in an allocated place on the previously created S3 bucket. To allow comparison of the result with the one numpy computes on a single node, a save of the initial matrix in a .csv file is also done prior to splitting the matrix in blocks and sending tasks to the jobs SQS queue.
+
+![alt text](https://user-images.githubusercontent.com/74055973/284330054-4d46b37c-427d-47d7-aaae-97a4ec223d52.png)
