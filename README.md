@@ -34,4 +34,18 @@ In order to verify the results, the master EC2 instance responsible for the fina
 
 The verification of the results can be done either from the master, the workers, or the user’s local machine, as they share the same .aws/credentials (ie. they all have access to the previously created services, including the S3 bucket), using the verify_result_matrix() which takes the bucket_name, the operation_id and the operation_type (add or mx).
 
-The function can be given an operation id to verify a specific operation that occurred in the environment, or simply verify all results of a specific operation type 
+The function can be given an operation id to verify a specific operation that occurred in the environment, or simply verify all results of a specific operation type
+
+### Progress Monitoring
+
+To monitor the progress of the solution, the scripts progressively print information regarding its evolution. Some of the scripts are sent from one instance to another, either using AWS’s SSM or a package called paramiko.
+
+![alt text](https://user-images.githubusercontent.com/74055973/284331008-4fb25a0c-464f-4bd0-ba4b-431ef2684d1d.png)
+
+Using paramiko, the instance submits one or multiple scripts to another instance and sleeps while progressively printing the output. Using SSM, the instance submits one or multiple scripts to another instance, but instantly gets returned an HTTP header that informs them if the scripts were correctly submitted to the instance or not. Once the scripts are submitted, they’re being executed in the background and the “sender” can resume its execution.
+
+![alt text](https://user-images.githubusercontent.com/74055973/284331271-4178ce0f-7182-4eb4-9878-f3003af872dd.png)
+
+Some of the scripts such as the installation of packages during the environment setup (figure 10) are preferably executed in the background/simultaneously, thus they’re sent using SSM. However, for the computation of matrix operations (figure 10) which requires a response such as a value or a boolean, paramiko is preferred. For huge matrix operations, a huge amount of lines could be outputted, thus the user can decide to semi-monitor the progress by specifying “False” in the solution_execution() function.
+
+![alt text](https://user-images.githubusercontent.com/74055973/284331422-50265618-5123-4ca4-9375-b2563a6568ba.png)
