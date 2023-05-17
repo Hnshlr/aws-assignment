@@ -49,3 +49,7 @@ Using paramiko, the instance submits one or multiple scripts to another instance
 Some of the scripts such as the installation of packages during the environment setup (figure 10) are preferably executed in the background/simultaneously, thus they’re sent using SSM. However, for the computation of matrix operations (figure 10) which requires a response such as a value or a boolean, paramiko is preferred. For huge matrix operations, a huge amount of lines could be outputted, thus the user can decide to semi-monitor the progress by specifying “False” in the solution_execution() function.
 
 ![alt text](https://user-images.githubusercontent.com/74055973/284331422-50265618-5123-4ca4-9375-b2563a6568ba.png)
+
+### Performance
+
+The measurement of the computation time is done locally on the user computer, and allows the user to decide which steps they want to take into account for the measurement, among the AWS environment setup, the solution backend synchronization and the matrix operation.
