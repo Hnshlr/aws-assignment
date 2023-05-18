@@ -53,3 +53,5 @@ Some of the scripts such as the installation of packages during the environment 
 ### Performance
 
 The measurement of the computation time is done locally on the user computer, and allows the user to decide which steps they want to take into account for the measurement, among the AWS environment setup, the solution backend synchronization and the matrix operation.
+
+Depending on the task, a timer is run either on an EC2 instance or the local machine. For testing purposes, environment setups and terminations, as well as matrix operations were run and measured. Here are some of the results I was able to gather:
